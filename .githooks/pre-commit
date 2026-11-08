@@ -1,0 +1,8 @@
+#!/bin/sh
+set -e
+if ! git diff --quiet -- src index.html package.json pnpm-lock.yaml vite.config.js; then
+  echo "Stage all application changes before committing so docs matches the commit." >&2
+  exit 1
+fi
+pnpm run build
+git add -A docs
