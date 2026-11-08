@@ -1,8 +1,14 @@
 ﻿import { FilesetResolver, PoseLandmarker } from '@mediapipe/tasks-vision';
 
-// The package and WASM runtime are deliberately pinned to the same release.
-const WASM_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/wasm';
-const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task';
+// Hosted builds use the assets shipped with the app. Direct-file previews
+// need CORS URLs because browsers block local fetches under file://.
+const directFile = location.protocol === 'file:';
+const WASM_URL = directFile
+  ? 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/wasm'
+  : new URL('mediapipe/wasm', document.baseURI).href;
+const MODEL_URL = directFile
+  ? 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task'
+  : new URL('mediapipe/pose_landmarker_full.task', document.baseURI).href;
 
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 const aborted = () => new DOMException('Analysis cancelled', 'AbortError');
@@ -77,6 +83,9 @@ async function getLandmarker() {
   })().catch(error => { landmarkerPromise = undefined; throw error; });
   return landmarkerPromise;
 }
+
+/** Start initializing the model on page load. Failures can be retried. */
+export function preloadPoseModel() { return getLandmarker(); }
 
 function candidate(landmarks) {
   const points = landmarks.filter(p => Number.isFinite(p.x) && Number.isFinite(p.y) && (p.visibility ?? 1) >= 0.35);
