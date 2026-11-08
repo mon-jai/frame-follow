@@ -23,7 +23,7 @@ function filePreview() {
 export default defineConfig({
   base: './',
   plugins: [filePreview()],
-  build: { assetsInlineLimit: 100000,
+  build: { outDir: 'docs', assetsInlineLimit: 100000,
     rollupOptions: { output: { format: 'iife', inlineDynamicImports: true } } },
   worker: { format: 'es' },
 });

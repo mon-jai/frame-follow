@@ -26,6 +26,11 @@ function status(message, progress) { $('#status').textContent=message; $('#progr
 status('Loading pose model…');
 preloadPoseModel().then(() => { if (!file) status('Add a video to get started.'); }).catch(() => { if (!file) status('Could not load the pose model. It will retry when you select a person.'); });
 function setBusy(value) { busy=value; $('#export').disabled=value || !samples.length; $('#replace').disabled=value || !file; $('#file').disabled=value; $('#selectPerson').disabled=value || !file; $('#seek').disabled=value || !file; $('#play').disabled=value || !file; }
+function setEncoding(value) {
+  $('#zoom').disabled = value;
+  $('#smooth').disabled = value;
+  document.querySelectorAll('[data-mode]').forEach(button => { button.disabled = value; });
+}
 async function load(f) { if (!f || busy) return; if (url) URL.revokeObjectURL(url); if(downloadUrl) URL.revokeObjectURL(downloadUrl); clearSelection(); file=f; samples=[]; path=[]; url=URL.createObjectURL(f); video.src=url; analysisVideo.src=url; setBusy(true); $('#empty').hidden=true; $('.preview').hidden=false; status('Opening video…',0); try { await Promise.all([video,analysisVideo].map(v=>new Promise((resolve,reject)=>{ v.onloadedmetadata=resolve; v.onerror=()=>reject(new Error('This video could not be opened by your browser.')); v.load(); }))); if(video.videoWidth < 2 || video.videoHeight < 2 || !Number.isFinite(video.duration)) throw new Error('This video has invalid dimensions or duration.'); $('#play').disabled=false; $('#seek').disabled=false; $('#seek').max=video.duration; $('#duration').textContent=format(video.duration); $('#dimensions').textContent=`${video.videoWidth} × ${video.videoHeight} PX · ${format(video.duration)}`; refresh(); status('Scrub to a clear frame, then select a person.'); } catch(e) { status(e.message || 'Could not open this video.'); } finally { setBusy(false); } }
 $('#selectPerson').onclick=choosePerson;
 
@@ -34,4 +39,32 @@ for(const type of ['dragenter','dragover']) $('#drop').addEventListener(type,e=>
 $('#zoom').oninput=refresh; $('#smooth').oninput=refresh; document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mode=b.dataset.mode; document.querySelectorAll('[data-mode]').forEach(x=>x.classList.toggle('active',x===b)); refresh();});
 $('#play').onclick=()=>{ if(selecting) clearSelection(); video.paused?video.play():video.pause(); }; video.onplay=()=>{$('#play').textContent='Ⅱ';}; video.onpause=()=>{$('#play').textContent='▶'; draw();}; video.ontimeupdate=draw; video.onseeked=draw; video.onloadeddata=draw; $('#seek').addEventListener('pointerdown',()=>{dragging=true; video.pause(); if(selecting) {clearSelection(); status('Scrub to a clear frame, then select a person.');}}); window.addEventListener('pointerup',()=>{dragging=false;}); $('#seek').oninput=e=>{ if(selecting) {clearSelection(); status('Scrub to a clear frame, then select a person.');} video.currentTime=+e.target.value; }; window.addEventListener('resize',()=>{if(selecting) renderPeople();}); function tick(){if(!video.paused && video.readyState>=2) draw(); requestAnimationFrame(tick);} tick();
 
-$('#export').onclick=async()=>{ if(!file||busy)return; video.pause(); setBusy(true); controller=new AbortController(); const {w,h}=dimensions(); try { status('Preparing encoder…',0); const blob=await exportVideo({file,width:video.videoWidth,height:video.videoHeight,cropWidth:w,cropHeight:h,duration:video.duration,getCropAt,onProgress:p=>status(`Encoding video… ${Math.round(p*100)}%`,p),signal:controller.signal}); if(downloadUrl) URL.revokeObjectURL(downloadUrl); downloadUrl=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=downloadUrl; a.download=`${file.name.replace(/\.[^.]+$/, '')}-follow.mp4`; a.click(); status('Your video is ready. Download started.'); } catch(e){status(e.message || 'Export failed.');} finally{setBusy(false);} };
+$('#export').onclick=async()=>{
+  if(!file||busy)return;
+  video.pause();
+  if(selecting) { clearSelection(); draw(); }
+  const exportFile = file;
+  const width = video.videoWidth, height = video.videoHeight, duration = video.duration;
+  const {w,h} = dimensions();
+  const exportPath = path.map(point => ({...point}));
+  const exportCropAt = time => {
+    const center = cropAtTime(exportPath, time);
+    return { x: Math.max(0, Math.min(width-w, center.x*width-w/2)),
+      y: Math.max(0, Math.min(height-h, center.y*height-h/2)) };
+  };
+  setBusy(true);
+  setEncoding(true);
+  controller=new AbortController();
+  try {
+    status('Preparing encoder…',0);
+    const blob=await exportVideo({file:exportFile,width,height,cropWidth:w,cropHeight:h,duration,getCropAt:exportCropAt,onProgress:p=>status(`Encoding video… ${Math.round(p*100)}%`,p),signal:controller.signal});
+    if(downloadUrl) URL.revokeObjectURL(downloadUrl);
+    downloadUrl=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=downloadUrl;
+    a.download=`${exportFile.name.replace(/\.[^.]+$/, '')}-follow.mp4`;
+    a.click();
+    status('Your video is ready. Download started.');
+  } catch(e){status(e.message || 'Export failed.');}
+  finally{setEncoding(false); setBusy(false);}
+};

@@ -4,3 +4,5 @@
 footer a{color:inherit;text-decoration:none}footer a:hover,footer a:focus-visible{color:#345b40;text-decoration:underline}
 
 @media(max-width:850px){#progressPanel.tracking{position:fixed;z-index:10;left:0;right:0;bottom:0;padding:12px 20px calc(12px + env(safe-area-inset-bottom));background:#fff;border-top:1px solid #dfe8dd;box-shadow:0 -4px 18px #1724211a}#progressPanel.tracking #status{margin:0 0 8px;color:#345b40;font-size:12px}#progressPanel.tracking progress{display:block}}
+
+input[type=range]:disabled{cursor:not-allowed;opacity:.45}

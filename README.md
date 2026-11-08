@@ -6,9 +6,9 @@ A client-side choreography video reframing tool. Choose a video, drag the timeli
 
 ## Development and GitHub Pages
 
-Install Node.js and pnpm, then run `pnpm install` and `pnpm dev`. `pnpm build` generates the static site in `dist/`, with relative asset paths suitable for a GitHub Pages project site. In repository settings, set **Pages → Build and deployment → Source** to **GitHub Actions**; the included workflow builds and deploys `dist/` when changes are pushed to `main`. You can also open `dist/index.html` directly for a local preview.
+Install Node.js and pnpm, then run `pnpm install` and `pnpm dev`. `pnpm build` generates the static site in `docs/`, with relative asset paths suitable for a GitHub Pages project site. In repository settings, set **Pages → Build and deployment → Source** to **Deploy from a branch**, select the `main` branch and `/docs` folder, then save. You can also open `docs/index.html` directly for a local preview.
 
-Installation configures Git's `core.hooksPath` to `.githooks`. The pre-commit hook builds and stages `dist/`; it refuses to run when tracked application files have unstaged changes, so stage those changes first. Git hooks are local and can be bypassed; run `pnpm build` manually if hooks are disabled. The hook requires pnpm to be available on PATH.
+Installation configures Git's `core.hooksPath` to `.githooks`. The pre-commit hook builds and stages `docs/`; it refuses to run when tracked application files have unstaged changes, so stage those changes first. Git hooks are local and can be bypassed; run `pnpm build` manually if hooks are disabled. The hook requires pnpm to be available on PATH.
 
 ## How it works
 
