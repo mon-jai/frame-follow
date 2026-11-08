@@ -23,6 +23,7 @@ function filePreview() {
 export default defineConfig({
   base: './',
   plugins: [filePreview()],
+  optimizeDeps: { exclude: ['@ffmpeg/ffmpeg'] },
   build: { outDir: 'docs', assetsInlineLimit: 100000,
     rollupOptions: { output: { format: 'iife', inlineDynamicImports: true } } },
   worker: { format: 'es' },

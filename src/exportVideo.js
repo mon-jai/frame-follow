@@ -9,7 +9,7 @@ import wasmURL from '@ffmpeg/core/wasm?url';
  * Dimensions must be even for broadly compatible H.264/yuv420p output.
  */
 async function exportWithFFmpeg({
-  file, width, height, cropWidth, cropHeight, duration, getCropAt,
+  file, width, height, cropWidth, cropHeight, duration, getCropAt, startTime = 0, endTime = duration,
   onProgress = () => {}, signal,
 }) {
   if (!file || !Number.isFinite(duration) || duration <= 0 ||
@@ -23,7 +23,7 @@ async function exportWithFFmpeg({
   const ffmpeg = new FFmpeg();
   const abort = () => ffmpeg.terminate();
   signal?.addEventListener('abort', abort, { once: true });
-  ffmpeg.on('progress', ({ progress }) => onProgress(Math.max(0, Math.min(1, progress))));
+  ffmpeg.on('progress', ({ time }) => onProgress(Math.max(0, Math.min(1, time / 1_000_000 / (endTime - startTime)))));
 
   const temporaryUrls = [];
   try {
@@ -51,10 +51,10 @@ async function exportWithFFmpeg({
     // Send crop commands at 60 Hz. The source frames themselves are decoded
     // and encoded once; neither the crop nor the output is rescaled.
     const commands = [];
-    const count = Math.ceil(duration * 60);
+    const count = Math.ceil((endTime - startTime) * 60);
     for (let i = 0; i <= count; i++) {
       const t = i / 60;
-      const point = getCropAt(t);
+      const point = getCropAt(Math.min(endTime, startTime + t));
       if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
         throw new Error('Tracking data is incomplete.');
       }
@@ -64,7 +64,7 @@ async function exportWithFFmpeg({
     }
     await ffmpeg.writeFile('movement.txt', new TextEncoder().encode(commands.join('\n')));
     const result = await ffmpeg.exec([
-      '-i', 'input.bin', '-map', '0:v:0', '-map', '0:a:0?',
+      '-ss', String(startTime), '-i', 'input.bin', '-t', String(endTime - startTime), '-map', '0:v:0', '-map', '0:a:0?',
       '-vf', `sendcmd=f=movement.txt,crop@follow=${cropWidth}:${cropHeight}:0:0:exact=1`,
       '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-pix_fmt', 'yuv420p',
       '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', 'output.mp4',
@@ -84,7 +84,7 @@ async function exportWithFFmpeg({
 }
 
 // Prepare the same conversion for both capability checks and actual exports.
-async function prepareNative({ file, width, height, cropWidth, cropHeight, getCropAt }) {
+async function prepareNative({ file, width, height, cropWidth, cropHeight, getCropAt, startTime = 0, endTime }) {
   if (typeof VideoDecoder === 'undefined' || typeof VideoEncoder === 'undefined') {
     throw new Error('WebCodecs is unavailable.');
   }
@@ -101,12 +101,16 @@ async function prepareNative({ file, width, height, cropWidth, cropHeight, getCr
     const output = new Output({ format: new Mp4OutputFormat({ fastStart: 'in-memory' }), target });
     const conversion = await Conversion.init({
       input, output, tracks: 'primary', showWarnings: false,
+      trim: { start: startTime, end: endTime },
+      // Copy audio only when its packet boundaries meet the trim exactly;
+      // otherwise transcode to avoid shifting the timeline or exposing outside media.
+      copy: { boundaryPolicy: 'shrink', boundaryTolerance: 0, shiftTolerance: 0 },
       video: {
         codec: 'avc', quality: new Quality('very-high'), forceTranscode: true,
         allowTransformationMetadata: false,
         processedWidth: cropWidth, processedHeight: cropHeight,
         process: sample => {
-          const point = getCropAt?.(sample.timestamp);
+          const point = getCropAt?.(sample.timestamp + startTime);
           if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
             throw new Error('Tracking data is incomplete.');
           }
@@ -122,7 +126,17 @@ async function prepareNative({ file, width, height, cropWidth, cropHeight, getCr
         (audioTrack && !conversion.utilizedTracks.includes(audioTrack))) {
       throw new Error('Browser cannot encode the required video or audio track.');
     }
-    return { input, conversion, target, hasAudio: !!audioTrack };
+    // A trim can fall wholly outside an existing audio track. Only require an
+    // output audio packet when an input packet actually overlaps the range.
+    let hasAudio = false;
+    if (audioTrack) {
+      const sink = new EncodedPacketSink(audioTrack);
+      let packet = await sink.getPacket(startTime);
+      if (packet && packet.timestamp + packet.duration <= startTime) packet = await sink.getNextPacket(packet);
+      if (!packet) packet = await sink.getFirstPacket();
+      hasAudio = !!packet && packet.timestamp < (endTime ?? Infinity) && packet.timestamp + packet.duration > startTime;
+    }
+    return { input, conversion, target, hasAudio };
   } catch (error) {
     input.dispose();
     throw error;
@@ -194,14 +208,18 @@ export async function probeExportOptions(options = {}) {
 
 /** Encode using the explicitly selected profile. */
 export async function exportVideo(options) {
-  const { file, width, height, cropWidth, cropHeight, duration, signal, onProgress = () => {}, encoder = 'webcodecs' } = options;
+  const { file, width, height, cropWidth, cropHeight, duration, signal, onProgress = () => {}, encoder = 'webcodecs', startTime = 0, endTime = duration } = options;
   if (!file || !Number.isFinite(duration) || duration <= 0 ||
       !Number.isInteger(cropWidth) || !Number.isInteger(cropHeight) ||
       cropWidth < 2 || cropHeight < 2 || cropWidth % 2 || cropHeight % 2 ||
       cropWidth > width || cropHeight > height) {
     throw new Error('Invalid video or crop dimensions.');
   }
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || startTime < 0 || endTime > duration || startTime >= endTime) {
+    throw new Error('Choose a valid trim range within the video.');
+  }
   if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
+  options = { ...options, startTime, endTime };
   onProgress(0);
   if (encoder === 'webcodecs') return exportNative(options);
   if (encoder === 'x264') return exportWithFFmpeg(options);
